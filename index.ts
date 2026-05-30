@@ -12,7 +12,20 @@ const requestCounter = new promClient.Counter({
 
 });
 
+const activeRequestGauge = new promClient.Gauge({
+    name: "active_requests",
+    help: "Number of active requests"
+});
+
+export const httpRequestDurationMicroseconds = new promClient.Histogram({
+    name: 'http_request_duration_ms',
+    help: 'Duration of HTTP requests in ms',
+    labelNames: ['method', 'route', 'code'],
+    buckets: [0.1, 5, 15, 50, 100, 300, 500, 1000, 3000, 5000] // Define your own buckets here
+});
+
 export function middleware(req: Request, res: Response, next: NextFunction) {
+    activeRequestGauge.inc();
     const startTime = Date.now()
 
     res.on('finish', () => {
@@ -26,6 +39,16 @@ export function middleware(req: Request, res: Response, next: NextFunction) {
             route: req.route ? req.route.path : req.path,
             status_code: res.statusCode
         });
+
+        if (req.route.path !== "/metrics") {
+            activeRequestGauge.dec();
+        }
+
+        httpRequestDurationMicroseconds.observe({
+            method: req.method,
+            route: req.route ? req.route.path : req.path,
+            code: res.statusCode,
+        }, endTime - startTime);
     });
 
     next();
@@ -41,6 +64,14 @@ app.get("/cpu", (req, res) => {
         message: "cpu"
     })
 })
+
+app.get("/timer", async (req, res) => {
+    await new Promise(s => setTimeout(s, 10000));
+    res.json({
+        message: "timer"
+    })
+})
+
 app.get("/users", (req, res) => {
 
     res.json({
